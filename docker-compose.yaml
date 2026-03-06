@@ -1,0 +1,83 @@
+services:
+  traefik:
+    image: docker.io/library/traefik:v3.6.7
+    restart: unless-stopped
+    command:
+      - --api.insecure=true
+      - --api.dashboard=true
+      - --log=true
+      # - --accesslog=true
+      # - --log.level=DEBUG
+      - --providers.docker
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.defaultRule=Host(`${HOSTNAME:?HOSTNAME must be defined as a string}`)
+      - --entrypoints.api.http.tls=${TLS:?TLS must be defined as true or false}
+      - --entrypoints.${INGRESS_ENTRY:?INGRESS_ENTRY must specify web or websecure}.address=:${PORT:?PORT must be defined, 80 for http, 443 for https}
+      - --entrypoints.${INGRESS_ENTRY}.http.tls=${TLS}
+      - --providers.file.directory=/etc/traefik/dynamic
+    ports:
+      - "${PORT}:${PORT}"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./local.cert:/certs/local.cert:ro
+      - ./local.key:/certs/local.key:ro
+      - ./dynamic_conf.yml:/etc/traefik/dynamic/dynamic_conf.yml:ro
+
+  excalidraw:
+    image: docker.io/library/excalidraw/excalidraw:v0.18.0-dev-local  # custom-built local use...
+    build:
+      context: .
+      dockerfile: excalidraw.local.dockerfile
+      args:
+        GIT_REF: ${GIT_REF:?GIT_REF must be defined to indicate which git version of excalidraw to build...}
+        PROTOCOL: ${PROTOCOL:?PROTOCOL must be defined}
+        HOSTNAME: ${HOSTNAME:?HOSTNAME must be defined}
+    # image: docker.io/library/excalidraw/excalidraw:v0.18.0-dev  # custom-built for https use
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.excalidraw.rule=Host(`${HOSTNAME}`)
+      - traefik.http.routers.excalidraw.priority=100  # higher than default but lower than path prefixes
+      - traefik.http.routers.excalidraw.entrypoints=${INGRESS_ENTRY}
+      - traefik.http.routers.excalidraw.tls=${TLS}
+      - traefik.http.services.excalidraw.loadbalancer.server.port=80
+
+  excalidraw-room:
+    image: docker.io/excalidraw/excalidraw-room:sha-03ff435
+    # environment:
+    #   REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.excalidraw-room.rule=PathPrefix(`/socket.io`) || PathPrefix(`/collab-server`)
+      - traefik.http.routers.excalidraw-room.priority=1000  # high priority to supersede default routes when applicable
+      - traefik.http.routers.excalidraw-room.entrypoints=${INGRESS_ENTRY}
+      - traefik.http.routers.excalidraw-room.tls=${TLS}
+      - traefik.http.services.excalidraw-room.loadbalancer.server.port=80
+      - traefik.http.routers.excalidraw-room.middlewares=room-replace
+      - traefik.http.middlewares.room-replace.replacepathregex.regex=^/collab-server(.*)
+      - traefik.http.middlewares.room-replace.replacepathregex.replacement=/socket.io/$1
+
+  # redis:
+  #   image: docker.io/library/redis:alpine
+  #   expose:
+  #     - 6379
+  #   restart: unless-stopped
+  
+  # storage doesn't quite work it seems. the formal excalidraw/excalidraw frontend is not compatible here
+  #   would need to derive from kiliandeca/excalidraw:latest probably
+  # storage:
+  #   image: docker.io/kiliandeca/excalidraw-storage-backend:latest
+  #   environment:
+  #     STORAGE_URI: redis://redis:6379
+  #     PORT: 8080
+  #   labels:
+  #     - traefik.enable=true
+  #     - traefik.http.routers.storage.rule=PathPrefix(`/api/v2`)
+  #     - traefik.http.routers.storage.priority=1000
+  #     - traefik.http.routers.storage.entrypoints=${INGRESS_ENTRY}
+  #     - traefik.http.routers.storage.tls=${TLS}
+  #     - traefik.http.services.storage.loadbalancer.server.port=8080
+  #   depends_on:
+  #     - redis
