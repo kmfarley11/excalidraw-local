@@ -11,18 +11,22 @@ Otherwise, we could fork the official excalidraw frontend ourselves and either p
 ## building & preparing for offline use
 
 ```bash
+export ARTIFACTS_DIR=../out
+mkdir -p ${ARTIFACTS_DIR}
+
 docker compose build excalidraw
 
+docker compose create excalidraw
 docker compose images excalidraw --format json
 
-IMG_REPO=$(docker compose images excalidraw --format json | jq '.[0].Repository')
-IMG_TAG=$(docker compose images excalidraw --format json | jq '.[0].Tag')
+export IMG_REPO=$(docker compose images excalidraw --format json | jq -r '.[0].Repository')
+export IMG_TAG=$(docker compose images excalidraw --format json | jq -r '.[0].Tag')
 
-docker save ${IMG_REPO}:${IMG_TAG} -o ./excalidraw.${IMG_TAG}.tar
+docker save ${IMG_REPO}:${IMG_TAG} -o ${ARTIFACTS_DIR}/excalidraw.${IMG_TAG}.tar
 
 ./genkey.sh
 
-tar -czvf -C ../ ./excalidraw-local.tar.gz ./excalidraw-local
+tar --exclude='.git' -czvf ${ARTIFACTS_DIR}/excalidraw-local.tar.gz -C ../ ./excalidraw-local
 
-ls -lh ../*tar*
+ls -lh ${ARTIFACTS_DIR}
 ```
